@@ -1,0 +1,418 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/database-schema"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  FRONT_DESK
+  DENTIST
+}
+
+enum RecordStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PatientGender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum PatientStatus {
+  REGISTERED
+  WAITING_FRONT_DESK @map("Waiting at Front Desk")
+  SENT_TO_DENTIST @map("Sent to Dentist")
+  WAITING_DENTIST @map("Waiting for Dentist")
+  WITH_DENTIST @map("With Dentist")
+  TREATMENT_COMPLETED @map("Treatment Completed")
+  SENT_TO_CASHIER @map("Sent to Cashier")
+  PAYMENT_PENDING @map("Payment Pending")
+  PAYMENT_COMPLETED @map("Payment Completed")
+  SENT_TO_PHARMACY @map("Sent to Pharmacy")
+  WAITING_PHARMACY @map("Waiting at Pharmacy")
+  MEDICINE_DISPENSED @map("Medicine Dispensed")
+  VISIT_COMPLETED @map("Visit Completed")
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  MISSED
+}
+
+enum TreatmentPlanStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TreatmentRecordStatus {
+  COMPLETED
+  FOLLOW_UP_REQUIRED
+}
+
+enum PrescriptionStatus {
+  PENDING
+  DISPENSED
+  PARTIALLY_DISPENSED
+}
+
+enum PaymentMethod {
+  CASH
+  MPESA
+  OTHER
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  VOID
+}
+
+enum Department {
+  FRONT_DESK
+  DENTIST
+  CASHIER
+  PHARMACY
+  COMPLETED
+}
+
+enum NotificationChannel {
+  IN_APP
+  SMS
+  EMAIL
+}
+
+enum NotificationStatus {
+  SENT
+  READ
+  FAILED
+}
+
+model User {
+  id                 String           @id @default(uuid()) @db.Uuid
+  name               String
+  email              String?          @unique
+  phone              String           @unique
+  password           String
+  role               UserRole
+  professionalInfo   String?          @map("professional_info")
+  status             RecordStatus     @default(ACTIVE)
+  lastLoginAt        DateTime?        @map("last_login_at")
+
+  dentistProfile     Dentist?
+  paymentsHandled    Payment[]        @relation("PaymentCashier")
+  invoicesCreated    Invoice[]        @relation("InvoiceCreator")
+  sentTransfers      PatientTransfer[] @relation("TransferSender")
+  receivedTransfers  PatientTransfer[] @relation("TransferReceiver")
+  sentMessages       Message[]        @relation("MessageSender")
+  receivedMessages   Message[]        @relation("MessageReceiver")
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+  registeredPatients Patient[]        @relation("PatientRegistrar")
+  createdAppointments Appointment[]   @relation("AppointmentCreator")
+  dispensedItems     PrescriptionItem[] @relation("PrescriptionDispenser")
+
+  @@map("Users")
+}
+
+model Dentist {
+  id             String       @id @default(uuid()) @db.Uuid
+  userId         String       @unique @map("user_id") @db.Uuid
+  specialization String?
+  status         RecordStatus @default(ACTIVE)
+
+  user            User             @relation(fields: [userId], references: [id])
+  appointments    Appointment[]
+  dentalRecords   DentalRecord[]
+  treatmentPlans  TreatmentPlan[]
+  treatmentRecords TreatmentRecord[]
+  prescriptions   Prescription[]
+
+  @@map("Dentists")
+}
+
+model Patient {
+  id               String          @id @default(uuid()) @db.Uuid
+  phoneNumber      String          @unique @map("phone_number")
+  name             String
+  gender           PatientGender?
+  dateOfBirth      DateTime?       @map("date_of_birth") @db.Date
+  email            String?
+  address          String?
+  emergencyContact String?         @map("emergency_contact")
+  medicalHistory   String?         @map("medical_history")
+  dentalHistory    String?         @map("dental_history")
+  status           PatientStatus   @default(REGISTERED)
+  registeredById   String?         @map("registered_by_id") @db.Uuid
+
+  registeredBy     User?           @relation("PatientRegistrar", fields: [registeredById], references: [id])
+  appointments     Appointment[]
+  dentalRecords    DentalRecord[]
+  treatmentPlans   TreatmentPlan[]
+  treatmentRecords TreatmentRecord[]
+  prescriptions    Prescription[]
+  payments         Payment[]
+  invoices         Invoice[]
+  transfers        PatientTransfer[]
+  notifications    Notification[]
+
+  @@map("Patients")
+}
+
+model Appointment {
+  id              String            @id @default(uuid()) @db.Uuid
+  patientId       String            @map("patient_id") @db.Uuid
+  dentistId       String?           @map("dentist_id") @db.Uuid
+  appointmentDate DateTime          @map("appointment_date") @db.Date
+  appointmentTime String            @map("appointment_time")
+  status          AppointmentStatus  @default(SCHEDULED)
+  reason          String?
+  createdById     String?           @map("created_by_id") @db.Uuid
+
+  patient         Patient           @relation(fields: [patientId], references: [id])
+  dentist         Dentist?          @relation(fields: [dentistId], references: [id])
+  createdBy       User?             @relation("AppointmentCreator", fields: [createdById], references: [id])
+
+  @@map("Appointments")
+}
+
+model DentalRecord {
+  id                 String   @id @default(uuid()) @db.Uuid
+  patientId          String   @map("patient_id") @db.Uuid
+  dentistId          String   @map("dentist_id") @db.Uuid
+  complaint          String?
+  examinationFindings String? @map("examination_findings")
+  dentalCondition    String?  @map("dental_condition")
+  observations       String?
+  diagnosis          String?
+  diagnosisNotes     String?  @map("diagnosis_notes")
+  notes              String?
+  recordDate         DateTime @default(now()) @map("record_date")
+
+  patient            Patient @relation(fields: [patientId], references: [id])
+  dentist            Dentist @relation(fields: [dentistId], references: [id])
+
+  @@map("DentalRecords")
+}
+
+model TreatmentPlan {
+  id                  String             @id @default(uuid()) @db.Uuid
+  patientId           String             @map("patient_id") @db.Uuid
+  dentistId           String             @map("dentist_id") @db.Uuid
+  treatmentName       String             @map("treatment_name")
+  description         String?
+  estimatedCost       Decimal?           @map("estimated_cost") @db.Decimal(10, 2)
+  status              TreatmentPlanStatus @default(PLANNED)
+  requiredAppointments Int?             @map("required_appointments")
+  followUpInfo        String?            @map("follow_up_info")
+
+  patient             Patient            @relation(fields: [patientId], references: [id])
+  dentist             Dentist            @relation(fields: [dentistId], references: [id])
+  treatmentRecords    TreatmentRecord[]
+
+  @@map("TreatmentPlans")
+}
+
+model TreatmentRecord {
+  id              String              @id @default(uuid()) @db.Uuid
+  patientId       String              @map("patient_id") @db.Uuid
+  dentistId       String              @map("dentist_id") @db.Uuid
+  treatmentPlanId String?             @map("treatment_plan_id") @db.Uuid
+  treatment       String
+  treatmentDate   DateTime            @default(now()) @map("treatment_date")
+  notes           String?
+  status          TreatmentRecordStatus @default(COMPLETED)
+
+  patient         Patient             @relation(fields: [patientId], references: [id])
+  dentist         Dentist             @relation(fields: [dentistId], references: [id])
+  treatmentPlan   TreatmentPlan?      @relation(fields: [treatmentPlanId], references: [id])
+
+  @@map("TreatmentRecords")
+}
+
+model Medicine {
+  id                String             @id @default(uuid()) @db.Uuid
+  name              String
+  quantity          Int                @default(0)
+  price             Decimal            @default(0) @db.Decimal(10, 2)
+  expiryDate        DateTime?          @map("expiry_date") @db.Date
+  lowStockThreshold Int                @default(10) @map("low_stock_threshold")
+
+  prescriptionItems PrescriptionItem[]
+
+  @@map("Medicines")
+}
+
+model Prescription {
+  id               String             @id @default(uuid()) @db.Uuid
+  patientId        String             @map("patient_id") @db.Uuid
+  dentistId        String             @map("dentist_id") @db.Uuid
+  prescriptionDate DateTime           @default(now()) @map("prescription_date")
+  instructions     String?
+  status           PrescriptionStatus @default(PENDING)
+
+  patient          Patient            @relation(fields: [patientId], references: [id])
+  dentist          Dentist            @relation(fields: [dentistId], references: [id])
+  items            PrescriptionItem[]
+
+  @@map("Prescriptions")
+}
+
+model PrescriptionItem {
+  id             String        @id @default(uuid()) @db.Uuid
+  prescriptionId String        @map("prescription_id") @db.Uuid
+  medicineId     String        @map("medicine_id") @db.Uuid
+  dosage         String?
+  frequency      String?
+  duration       String?
+  instructions   String?
+  dispensed      Boolean       @default(false)
+  dispensedAt    DateTime?     @map("dispensed_at")
+  dispensedById  String?       @map("dispensed_by_id") @db.Uuid
+
+  prescription   Prescription  @relation(fields: [prescriptionId], references: [id])
+  medicine      Medicine      @relation(fields: [medicineId], references: [id])
+  dispensedBy   User?         @relation("PrescriptionDispenser", fields: [dispensedById], references: [id])
+
+  @@map("PrescriptionItems")
+}
+
+model Payment {
+  id                  String        @id @default(uuid()) @db.Uuid
+  patientId           String        @map("patient_id") @db.Uuid
+  amount              Decimal       @db.Decimal(10, 2)
+  paymentMethod       PaymentMethod @map("payment_method")
+  transactionReference String?      @map("transaction_reference")
+  paymentDate        DateTime      @default(now()) @map("payment_date")
+  cashierId           String        @map("cashier_id") @db.Uuid
+  serviceDescription String?       @map("service_description")
+  balance            Decimal       @default(0) @db.Decimal(10, 2)
+  invoiceId          String?       @map("invoice_id") @db.Uuid
+
+  patient            Patient       @relation(fields: [patientId], references: [id])
+  cashier            User          @relation("PaymentCashier", fields: [cashierId], references: [id])
+  invoice            Invoice?      @relation(fields: [invoiceId], references: [id])
+  receipt            Receipt?
+
+  @@map("Payments")
+}
+
+model Receipt {
+  id            String   @id @default(uuid()) @db.Uuid
+  paymentId     String   @unique @map("payment_id") @db.Uuid
+  receiptNumber String   @unique @map("receipt_number")
+  generatedAt   DateTime @default(now()) @map("generated_at")
+
+  payment       Payment  @relation(fields: [paymentId], references: [id])
+
+  @@map("Receipts")
+}
+
+model Invoice {
+  id            String        @id @default(uuid()) @db.Uuid
+  patientId     String        @map("patient_id") @db.Uuid
+  invoiceNumber String        @unique @map("invoice_number")
+  status        InvoiceStatus @default(UNPAID)
+  subtotal      Decimal       @default(0) @db.Decimal(10, 2)
+  discount      Decimal       @default(0) @db.Decimal(10, 2)
+  tax           Decimal       @default(0) @db.Decimal(10, 2)
+  totalAmount   Decimal       @default(0) @map("total_amount") @db.Decimal(10, 2)
+  amountPaid    Decimal       @default(0) @map("amount_paid") @db.Decimal(10, 2)
+  balance       Decimal       @default(0) @db.Decimal(10, 2)
+  notes         String?
+  createdById   String?       @map("created_by_id") @db.Uuid
+  voidedAt      DateTime?     @map("voided_at")
+
+  patient       Patient       @relation(fields: [patientId], references: [id])
+  createdBy     User?         @relation("InvoiceCreator", fields: [createdById], references: [id])
+  items         InvoiceItem[]
+  payments      Payment[]
+
+  @@map("Invoices")
+}
+
+model InvoiceItem {
+  id          String  @id @default(uuid()) @db.Uuid
+  invoiceId   String  @map("invoice_id") @db.Uuid
+  description String
+  quantity    Decimal @default(1) @db.Decimal(10, 2)
+  unitPrice   Decimal @map("unit_price") @db.Decimal(10, 2)
+  amount      Decimal @db.Decimal(10, 2)
+
+  invoice     Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@map("InvoiceItems")
+}
+
+model PatientTransfer {
+  id             String     @id @default(uuid()) @db.Uuid
+  patientId      String     @map("patient_id") @db.Uuid
+  senderId       String?    @map("sender_id") @db.Uuid
+  receiverId     String?    @map("receiver_id") @db.Uuid
+  fromDepartment Department? @map("from_department")
+  toDepartment   Department @map("to_department")
+  previousStatus String?    @map("previous_status")
+  newStatus      String?    @map("new_status")
+  transferTime   DateTime   @default(now()) @map("transfer_time")
+  reason         String?
+  ticketNumber   String?    @map("ticket_number")
+
+  patient        Patient    @relation(fields: [patientId], references: [id])
+  sender         User?      @relation("TransferSender", fields: [senderId], references: [id])
+  receiver       User?      @relation("TransferReceiver", fields: [receiverId], references: [id])
+
+  @@map("PatientTransfers")
+}
+
+model Message {
+  id         String  @id @default(uuid()) @db.Uuid
+  senderId   String  @map("sender_id") @db.Uuid
+  receiverId String? @map("receiver_id") @db.Uuid
+  groupName  String? @map("group_name")
+  message    String
+  readStatus Boolean @default(false) @map("read_status")
+
+  sender     User    @relation("MessageSender", fields: [senderId], references: [id])
+  receiver   User?   @relation("MessageReceiver", fields: [receiverId], references: [id])
+
+  @@map("Messages")
+}
+
+model Notification {
+  id        String               @id @default(uuid()) @db.Uuid
+  userId    String?              @map("user_id") @db.Uuid
+  patientId String?              @map("patient_id") @db.Uuid
+  title     String
+  message   String
+  channel   NotificationChannel  @default(IN_APP)
+  status    NotificationStatus   @default(SENT)
+
+  user      User?                @relation(fields: [userId], references: [id])
+  patient   Patient?             @relation(fields: [patientId], references: [id])
+
+  @@map("Notifications")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String?  @map("user_id") @db.Uuid
+  action     String
+  recordType String?  @map("record_type")
+  recordId   String?  @map("record_id") @db.Uuid
+  details    Json?
+  timestamp  DateTime @default(now())
+
+  user       User?    @relation(fields: [userId], references: [id])
+
+  @@map("AuditLogs")
+}
